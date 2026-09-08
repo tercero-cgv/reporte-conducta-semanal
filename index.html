@@ -299,6 +299,8 @@ window.saveDraft = async function() {
     statusEl.innerText = 'Error guardando avance: ' + e.message;
   }
 };
+
+async function fetchHistory(studentId) {
   const q = query(collection(db, 'reporteConducta'), where('estudianteId', '==', studentId), orderBy('dateStart', 'asc'));
   const snap = await getDocs(q);
   const history = [];
