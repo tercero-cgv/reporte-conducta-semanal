@@ -87,7 +87,9 @@
     <label>Observaciones adicionales (Opcional):</label>
     <textarea id="notes" rows="3"></textarea>
 
-    <button type="button" onclick="generateReport()">Generar e Imprimir Reporte</button>
+    <button type="button" class="secondary" onclick="saveDraft()">Guardar avance (sin cerrar semana)</button>
+    <p id="draftStatus" style="text-align:center; font-size:13px; color:#64748b; min-height:16px;"></p>
+    <button type="button" onclick="generateReport()">Generar e Imprimir Reporte (cierra la semana)</button>
     <button type="button" class="secondary" onclick="toggleHistory()">Ver Historial del Estudiante</button>
     <button type="button" class="secondary" onclick="exportHistoryCSV()">Exportar Historial de este Estudiante (CSV)</button>
     <button type="button" class="secondary" onclick="exportAllHistoryCSV()">Exportar Historial de TODOS (CSV)</button>
@@ -129,7 +131,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, query, where, orderBy, getDocs, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, query, where, orderBy, getDocs, addDoc, serverTimestamp, doc, getDoc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDv7kYRAPrWRDH7j-hWj8WKMNWnL0sm2JE",
@@ -195,6 +197,8 @@ async function loadStudents() {
     });
     sel.innerHTML = '<option value="">-- Seleccione --</option>' +
       students.map(s => `<option value="${s.id}">${s.nombreCompleto}</option>`).join('');
+    sel.addEventListener('change', loadDraft);
+    document.getElementById('dateStart').addEventListener('change', loadDraft);
   } catch (e) {
     const urlMatch = e.message.match(/https:\/\/[^\s]+/);
     if (urlMatch) {
@@ -225,7 +229,76 @@ function buildCriteriaForm() {
   });
 }
 
-async function fetchHistory(studentId) {
+function draftId(studentId, dateStart) {
+  return `${studentId}_${dateStart}`;
+}
+
+function resetCriteriaForm() {
+  criteria.forEach(c => {
+    const radios = document.querySelectorAll(`input[name="${c.id}"]`);
+    radios.forEach(r => r.checked = false);
+    document.getElementById(`card-${c.id}`).classList.remove('missing');
+  });
+  document.getElementById('notes').value = '';
+  document.getElementById('actionRequired').selectedIndex = 0;
+}
+
+async function loadDraft() {
+  const studentId = document.getElementById('studentSelect').value;
+  const start = document.getElementById('dateStart').value;
+  const statusEl = document.getElementById('draftStatus');
+  resetCriteriaForm();
+  statusEl.innerText = '';
+  if (!studentId || !start) return;
+  try {
+    const snap = await getDoc(doc(db, 'reporteConductaBorrador', draftId(studentId, start)));
+    if (snap.exists()) {
+      const d = snap.data();
+      criteria.forEach(c => {
+        if (d.results && d.results[c.id]) {
+          const radio = document.querySelector(`input[name="${c.id}"][value="${d.results[c.id]}"]`);
+          if (radio) radio.checked = true;
+        }
+      });
+      if (d.notes) document.getElementById('notes').value = d.notes;
+      if (d.actionRequired) document.getElementById('actionRequired').value = d.actionRequired;
+      if (d.dateEnd) document.getElementById('dateEnd').value = d.dateEnd;
+      statusEl.innerText = 'Avance previo cargado para este estudiante y semana.';
+    }
+  } catch (e) {
+    statusEl.innerText = 'No se pudo revisar si había avance guardado: ' + e.message;
+  }
+}
+
+window.saveDraft = async function() {
+  const studentId = document.getElementById('studentSelect').value;
+  const start = document.getElementById('dateStart').value;
+  const statusEl = document.getElementById('draftStatus');
+  if (!studentId || !start) {
+    statusEl.innerText = 'Selecciona estudiante y fecha de inicio antes de guardar avance.';
+    return;
+  }
+  const results = {};
+  criteria.forEach(c => {
+    const checked = document.querySelector(`input[name="${c.id}"]:checked`);
+    if (checked) results[c.id] = checked.value;
+  });
+  try {
+    await setDoc(doc(db, 'reporteConductaBorrador', draftId(studentId, start)), {
+      estudianteId: studentId,
+      dateStart: start,
+      dateEnd: document.getElementById('dateEnd').value || '',
+      results,
+      notes: document.getElementById('notes').value || '',
+      actionRequired: document.getElementById('actionRequired').value,
+      teacherEmail: auth.currentUser.email,
+      updatedAt: serverTimestamp()
+    });
+    statusEl.innerText = 'Avance guardado (' + new Date().toLocaleTimeString() + ').';
+  } catch (e) {
+    statusEl.innerText = 'Error guardando avance: ' + e.message;
+  }
+};
   const q = query(collection(db, 'reporteConducta'), where('estudianteId', '==', studentId), orderBy('dateStart', 'asc'));
   const snap = await getDocs(q);
   const history = [];
@@ -357,6 +430,10 @@ window.generateReport = async function() {
     teacherEmail: auth.currentUser.email,
     createdAt: serverTimestamp()
   });
+
+  try {
+    await deleteDoc(doc(db, 'reporteConductaBorrador', draftId(studentId, start)));
+  } catch (e) { /* si no había borrador, no pasa nada */ }
 
   window.print();
 };
