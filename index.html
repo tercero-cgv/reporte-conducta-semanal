@@ -185,15 +185,20 @@ onAuthStateChanged(auth, async (user) => {
 async function loadStudents() {
   const sel = document.getElementById('studentSelect');
   sel.innerHTML = '<option value="">Cargando...</option>';
-  const q = query(collection(db, 'estudiantes'), where('activo', '==', true), orderBy('apellidos'));
-  const snap = await getDocs(q);
-  students = [];
-  snap.forEach(docSnap => {
-    const d = docSnap.data();
-    students.push({ id: docSnap.id, nombreCompleto: `${d.nombre} ${d.apellidos}` });
-  });
-  sel.innerHTML = '<option value="">-- Seleccione --</option>' +
-    students.map(s => `<option value="${s.id}">${s.nombreCompleto}</option>`).join('');
+  try {
+    const q = query(collection(db, 'estudiantes'), where('activo', '==', true), orderBy('apellidos'));
+    const snap = await getDocs(q);
+    students = [];
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      students.push({ id: docSnap.id, nombreCompleto: `${d.nombre} ${d.apellidos}` });
+    });
+    sel.innerHTML = '<option value="">-- Seleccione --</option>' +
+      students.map(s => `<option value="${s.id}">${s.nombreCompleto}</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Error al cargar</option>';
+    alert('Error cargando estudiantes: ' + e.message);
+  }
 }
 
 function buildCriteriaForm() {
