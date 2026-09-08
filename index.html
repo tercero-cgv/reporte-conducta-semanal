@@ -196,8 +196,16 @@ async function loadStudents() {
     sel.innerHTML = '<option value="">-- Seleccione --</option>' +
       students.map(s => `<option value="${s.id}">${s.nombreCompleto}</option>`).join('');
   } catch (e) {
-    sel.innerHTML = '<option value="">Error al cargar</option>';
-    alert('Error cargando estudiantes: ' + e.message);
+    const urlMatch = e.message.match(/https:\/\/[^\s]+/);
+    if (urlMatch) {
+      sel.innerHTML = '<option value="">Falta crear índice</option>';
+      sel.insertAdjacentHTML('afterend',
+        `<p style="color:#b91c1c; font-size:13px;">Falta un índice en Firestore. Toca este link para crearlo: <a href="${urlMatch[0]}" target="_blank" style="color:#1e3a8a; font-weight:bold;">Crear índice</a></p>`);
+    } else {
+      sel.innerHTML = '<option value="">Error al cargar</option>';
+      sel.insertAdjacentHTML('afterend',
+        `<p style="color:#b91c1c; font-size:13px;">Error: ${e.message}</p>`);
+    }
   }
 }
 
