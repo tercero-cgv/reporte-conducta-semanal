@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reporte Semanal de Conducta</title>
+<style>
+  :root { --primary:#1e3a8a; --bg:#f8fafc; --card:#fff; --border:#cbd5e1; --warn:#b91c1c; }
+  body { font-family: Arial, sans-serif; background:var(--bg); margin:0; padding:15px; color:#334155; }
+  .container { max-width:800px; margin:0 auto; background:var(--card); padding:20px; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,.1); }
+  h1,h2,h3 { text-align:center; color:var(--primary); margin-top:0; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media(max-width:600px){ .grid-2{grid-template-columns:1fr;} }
+  label { font-weight:bold; display:block; margin-top:10px; margin-bottom:5px; }
+  input,select,textarea { width:100%; padding:10px; border:1px solid var(--border); border-radius:6px; box-sizing:border-box; font-size:14px; }
+  .criterion-card { border:1px solid var(--border); border-radius:6px; padding:12px; margin-bottom:10px; background:#f1f5f9; }
+  .criterion-card.missing { border-color:var(--warn); background:#fef2f2; }
+  .criterion-title { font-weight:bold; margin-bottom:8px; }
+  .options { display:flex; gap:15px; flex-wrap:wrap; }
+  .options label { font-weight:normal; margin:0; cursor:pointer; }
+  .scale-legend { font-size:12px; color:#64748b; text-align:center; margin-bottom:15px; }
+  button { width:100%; background:var(--primary); color:#fff; padding:12px; border:none; border-radius:6px; font-size:16px; font-weight:bold; cursor:pointer; margin-top:15px; }
+  button:hover { background:#1e40af; }
+  button.secondary { background:#64748b; }
+  button.secondary:hover { background:#475569; }
+  #historyView { margin-top:15px; border-top:1px solid var(--border); padding-top:15px; }
+  #historyView table { width:100%; border-collapse:collapse; font-size:13px; }
+  #historyView th,#historyView td { border:1px solid var(--border); padding:6px; text-align:center; }
+  #loginScreen { max-width:360px; margin:60px auto; }
+  #loginError { color:var(--warn); text-align:center; font-size:13px; min-height:18px; }
+  #userBar { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:#64748b; margin-bottom:10px; }
+  #userBar button { width:auto; padding:6px 12px; font-size:12px; margin:0; }
+  @media print {
+    body { background:#fff; padding:0; }
+    .no-print { display:none !important; }
+    .container { box-shadow:none; border:none; padding:0; max-width:100%; }
+    .print-only { display:block !important; }
+    table { width:100%; border-collapse:collapse; margin-top:15px; }
+    th,td { border:1px solid #000; padding:8px; text-align:left; font-size:12pt; }
+    th { background:#f2f2f2; }
+    .cut-line { border-top:2px dashed #000; margin-top:30px; padding-top:15px; }
+  }
+  .print-only { display:none; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="container no-print">
+  <h1>Reporte de Conducta</h1>
+  <label>Correo</label>
+  <input type="email" id="loginEmail" value="de128954@miescuela.pr">
+  <label>Contraseña</label>
+  <input type="password" id="loginPassword">
+  <button type="button" onclick="doLogin()">Entrar</button>
+  <p id="loginError"></p>
+</div>
+
+<div id="appScreen" class="container no-print" style="display:none;">
+  <div id="userBar">
+    <span id="userEmailLabel"></span>
+    <button type="button" class="secondary" onclick="doLogout()">Salir</button>
+  </div>
+
+  <h1>Reporte Semanal de Conducta</h1>
+  <p style="text-align:center; color:#64748b;">Grupo 3-1. Seleccione el estudiante, evalúe cada criterio y presione "Generar".</p>
+
+  <form id="reportForm">
+    <label>Estudiante:</label>
+    <select id="studentSelect"><option value="">Cargando estudiantes...</option></select>
+
+    <div class="grid-2">
+      <div><label>Desde (Fecha Inicio):</label><input type="date" id="dateStart" required></div>
+      <div><label>Hasta (Fecha Fin):</label><input type="date" id="dateEnd" required></div>
+    </div>
+
+    <h3>Evaluación de Conductas</h3>
+    <p class="scale-legend"><strong>S</strong>=Siempre/Excelente | <strong>F</strong>=Con Frecuencia/Debe mejorar | <strong>R</strong>=Rara vez/Preocupante</p>
+    <div id="criteriaContainer"></div>
+
+    <label>Acción requerida en el hogar:</label>
+    <select id="actionRequired">
+      <option value="Felicitaciones por mantener un excelente comportamiento.">Excelente trabajo (Felicitación)</option>
+      <option value="Dialogar en casa sobre la importancia de la disciplina y el respeto en la escuela.">Requiere dialogo en el hogar</option>
+      <option value="Se requiere cita presencial o telefónica con el maestro.">Solicitud de reunión con el maestro</option>
+    </select>
+
+    <label>Observaciones adicionales (Opcional):</label>
+    <textarea id="notes" rows="3"></textarea>
+
+    <button type="button" onclick="generateReport()">Generar e Imprimir Reporte</button>
+    <button type="button" class="secondary" onclick="toggleHistory()">Ver Historial del Estudiante</button>
+    <button type="button" class="secondary" onclick="exportHistoryCSV()">Exportar Historial de este Estudiante (CSV)</button>
+    <button type="button" class="secondary" onclick="exportAllHistoryCSV()">Exportar Historial de TODOS (CSV)</button>
+
+    <div id="historyView" style="display:none;"></div>
+  </form>
+</div>
+
+<div id="printableArea" class="print-only">
+  <div id="teacherStrip">
+    <p style="text-align:center; font-weight:bold; font-size:10pt; margin-bottom:2px;">COPIA DEL MAESTRO — ARCHIVAR</p>
+    <p style="font-size:10pt; margin:2px 0;">Estudiante: <span id="tName"></span> | Semana: <span id="tDates"></span></p>
+    <table style="font-size:10pt;"><thead><tr><th>Criterio</th><th style="width:15%;">Resultado</th></tr></thead><tbody id="tTableBody"></tbody></table>
+    <p id="tPatternAlert" style="display:none; font-size:10pt; font-weight:bold; color:#b91c1c;"></p>
+  </div>
+  <div class="cut-line"><p style="text-align:center; font-weight:bold;">✂ CORTAR AQUÍ — LO SIGUIENTE SE ENVÍA AL HOGAR ✂</p></div>
+
+  <h2 style="margin-bottom:5px;">REPORTE SEMANAL DE CONDUCTA Y RESPONSABILIDAD</h2>
+  <p style="text-align:center; font-size:11pt; margin-top:0;">Comunicación Familia - Escuela</p>
+  <p><strong>Estudiante:</strong> <span id="pName"></span> | <strong>Grado:</strong> 3-1</p>
+  <p><strong>Semana del:</strong> <span id="pDates"></span></p>
+  <table><thead><tr><th>Área de Evaluación</th><th style="width:15%; text-align:center;">Resultado</th></tr></thead><tbody id="pTableBody"></tbody></table>
+  <p id="pPatternAlert" style="display:none; color:#b91c1c; font-weight:bold; border:2px solid #b91c1c; padding:8px; border-radius:6px;"></p>
+  <p style="margin-top:15px;"><strong>Acción requerida:</strong> <span id="pAction"></span></p>
+  <p><strong>Observaciones:</strong> <span id="pNotes"></span></p>
+
+  <div class="cut-line">
+    <p style="text-align:center; font-weight:bold;">✂ DESPRENDER Y DEVOLVER FIRMADO AL MAESTRO EL PRÓXIMO LUNES ✂</p>
+    <p><strong>ACUSE DE RECIBO DE REPORTE SEMANAL</strong></p>
+    <p>Estudiante: <span id="pNameStub"></span> | Semana: <span id="pDatesStub"></span></p>
+    <p>Confirmo que he revisado el reporte de conducta semanal correspondiente a mi hijo(a).</p><br>
+    <div style="display:flex; justify-content:space-between; margin-top:20px;">
+      <div>Firma del Encargado: ___________________________</div>
+      <div>Fecha: ____/____/________</div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, query, where, orderBy, getDocs, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDv7kYRAPrWRDH7j-hWj8WKMNWnL0sm2JE",
+  authDomain: "carpeta-digitalhl.firebaseapp.com",
+  projectId: "carpeta-digitalhl",
+  storageBucket: "carpeta-digitalhl.firebasestorage.app",
+  messagingSenderId: "13511526310",
+  appId: "1:13511526310:web:cebf45e5db3c6ec439f167"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const criteria = [
+  { id: 'puntualidad', text: 'Puntualidad: Llega a tiempo al salón al inicio del día y luego del almuerzo.' },
+  { id: 'respeto', text: 'Respeto a la autoridad: Sigue instrucciones al primer llamado sin faltar al respeto.' },
+  { id: 'atencion', text: 'Atención en clase: Escucha en silencio durante las explicaciones sin hablar constantemente.' },
+  { id: 'trabajo', text: 'Trabajo individual: Inicia y termina sus tareas a tiempo sin copiarse de otros.' },
+  { id: 'bano', text: 'Uso del tiempo: No solicita ir al baño en exceso de forma repetida sin necesidad.' },
+  { id: 'alerta', text: 'Alerta y descanso: Llega a clase descansado(a) y se mantiene despierto(a) durante las lecciones.' }
+];
+
+let students = [];
+
+window.doLogin = async function() {
+  const email = document.getElementById('loginEmail').value;
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.innerText = '';
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+  } catch (e) {
+    errEl.innerText = 'No se pudo entrar: ' + e.message;
+  }
+};
+
+window.doLogout = function() { signOut(auth); };
+
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appScreen').style.display = 'block';
+    document.getElementById('userEmailLabel').innerText = user.email;
+    await loadStudents();
+    buildCriteriaForm();
+  } else {
+    document.getElementById('loginScreen').style.display = 'block';
+    document.getElementById('appScreen').style.display = 'none';
+  }
+});
+
+async function loadStudents() {
+  const sel = document.getElementById('studentSelect');
+  sel.innerHTML = '<option value="">Cargando...</option>';
+  const q = query(collection(db, 'estudiantes'), where('activo', '==', true), orderBy('apellidos'));
+  const snap = await getDocs(q);
+  students = [];
+  snap.forEach(docSnap => {
+    const d = docSnap.data();
+    students.push({ id: docSnap.id, nombreCompleto: `${d.nombre} ${d.apellidos}` });
+  });
+  sel.innerHTML = '<option value="">-- Seleccione --</option>' +
+    students.map(s => `<option value="${s.id}">${s.nombreCompleto}</option>`).join('');
+}
+
+function buildCriteriaForm() {
+  const container = document.getElementById('criteriaContainer');
+  container.innerHTML = '';
+  criteria.forEach(c => {
+    container.innerHTML += `
+      <div class="criterion-card" id="card-${c.id}">
+        <div class="criterion-title">${c.text}</div>
+        <div class="options">
+          <label><input type="radio" name="${c.id}" value="S"> S - Siempre</label>
+          <label><input type="radio" name="${c.id}" value="F"> F - Con Frecuencia</label>
+          <label><input type="radio" name="${c.id}" value="R"> R - Rara vez</label>
+        </div>
+      </div>`;
+  });
+}
+
+async function fetchHistory(studentId) {
+  const q = query(collection(db, 'reporteConducta'), where('estudianteId', '==', studentId), orderBy('dateStart', 'asc'));
+  const snap = await getDocs(q);
+  const history = [];
+  snap.forEach(d => history.push(d.data()));
+  return history;
+}
+
+function detectPatterns(history, latestResults) {
+  const lastThree = history.slice(-2).concat([{ results: latestResults }]);
+  const flagged = [];
+  criteria.forEach(c => {
+    const rCount = lastThree.filter(e => e.results[c.id] === 'R').length;
+    if (rCount >= 2) flagged.push(c.text);
+  });
+  return flagged;
+}
+
+window.toggleHistory = async function() {
+  const view = document.getElementById('historyView');
+  const studentId = document.getElementById('studentSelect').value;
+  if (!studentId) { alert('Seleccione un estudiante.'); return; }
+  if (view.style.display === 'none') {
+    const history = await fetchHistory(studentId);
+    if (history.length === 0) {
+      view.innerHTML = '<p style="text-align:center; color:#64748b;">Sin historial guardado para este estudiante.</p>';
+    } else {
+      let html = '<table><thead><tr><th>Semana</th>' + criteria.map(c => `<th>${c.id}</th>`).join('') + '</tr></thead><tbody>';
+      history.forEach(e => {
+        html += `<tr><td>${e.dateStart} - ${e.dateEnd}</td>` + criteria.map(c => `<td>${e.results[c.id] || '-'}</td>`).join('') + '</tr>';
+      });
+      html += '</tbody></table>';
+      view.innerHTML = html;
+    }
+    view.style.display = 'block';
+  } else {
+    view.style.display = 'none';
+  }
+};
+
+function downloadCSV(filename, rows) {
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+window.exportHistoryCSV = async function() {
+  const studentId = document.getElementById('studentSelect').value;
+  if (!studentId) { alert('Seleccione un estudiante.'); return; }
+  const student = students.find(s => s.id === studentId);
+  const history = await fetchHistory(studentId);
+  if (history.length === 0) { alert('Sin historial para este estudiante.'); return; }
+  const header = ['Estudiante','Semana Inicio','Semana Fin', ...criteria.map(c => c.id)];
+  const rows = [header];
+  history.forEach(e => rows.push([student.nombreCompleto, e.dateStart, e.dateEnd, ...criteria.map(c => e.results[c.id] || '')]));
+  downloadCSV(`historial_${student.nombreCompleto.replace(/\s+/g,'_')}.csv`, rows);
+};
+
+window.exportAllHistoryCSV = async function() {
+  const snap = await getDocs(collection(db, 'reporteConducta'));
+  if (snap.empty) { alert('No hay historial guardado todavía.'); return; }
+  const header = ['Estudiante','Semana Inicio','Semana Fin', ...criteria.map(c => c.id)];
+  const rows = [header];
+  snap.forEach(d => {
+    const e = d.data();
+    rows.push([e.nombreCompleto || e.estudianteId, e.dateStart, e.dateEnd, ...criteria.map(c => e.results[c.id] || '')]);
+  });
+  downloadCSV('historial_todos_los_estudiantes.csv', rows);
+};
+
+window.generateReport = async function() {
+  const studentId = document.getElementById('studentSelect').value;
+  const start = document.getElementById('dateStart').value;
+  const end = document.getElementById('dateEnd').value;
+  if (!studentId || !start || !end) { alert('Seleccione estudiante y fechas.'); return; }
+  const student = students.find(s => s.id === studentId);
+
+  let missing = false;
+  const results = {};
+  criteria.forEach(c => {
+    const checked = document.querySelector(`input[name="${c.id}"]:checked`);
+    const card = document.getElementById(`card-${c.id}`);
+    if (!checked) { missing = true; card.classList.add('missing'); }
+    else { card.classList.remove('missing'); results[c.id] = checked.value; }
+  });
+  if (missing) { alert('Falta evaluar uno o más criterios (marcados en rojo).'); return; }
+
+  const scaleLabels = { S:'S - Siempre', F:'F - Con Frecuencia', R:'R - Rara vez' };
+  document.getElementById('pName').innerText = student.nombreCompleto;
+  document.getElementById('pNameStub').innerText = student.nombreCompleto;
+  document.getElementById('pDates').innerText = `${start} al ${end}`;
+  document.getElementById('pDatesStub').innerText = `${start} al ${end}`;
+  document.getElementById('pAction').innerText = document.getElementById('actionRequired').value;
+  document.getElementById('pNotes').innerText = document.getElementById('notes').value || 'Sin observaciones adicionales.';
+  document.getElementById('tName').innerText = student.nombreCompleto;
+  document.getElementById('tDates').innerText = `${start} al ${end}`;
+
+  const pBody = document.getElementById('pTableBody'); pBody.innerHTML = '';
+  const tBody = document.getElementById('tTableBody'); tBody.innerHTML = '';
+  criteria.forEach(c => {
+    pBody.innerHTML += `<tr><td>${c.text}</td><td style="text-align:center; font-weight:bold;">${scaleLabels[results[c.id]]}</td></tr>`;
+    tBody.innerHTML += `<tr><td>${c.text}</td><td style="text-align:center; font-weight:bold;">${results[c.id]}</td></tr>`;
+  });
+
+  const history = await fetchHistory(studentId);
+  const flagged = detectPatterns(history, results);
+  const pAlert = document.getElementById('pPatternAlert');
+  const tAlert = document.getElementById('tPatternAlert');
+  if (flagged.length > 0) {
+    const msg = 'Alerta de patrón (2+ semanas con "R"): ' + flagged.join('; ');
+    pAlert.style.display = 'block'; pAlert.innerText = msg;
+    tAlert.style.display = 'block'; tAlert.innerText = msg;
+  } else {
+    pAlert.style.display = 'none'; pAlert.innerText = '';
+    tAlert.style.display = 'none'; tAlert.innerText = '';
+  }
+
+  await addDoc(collection(db, 'reporteConducta'), {
+    estudianteId: studentId,
+    nombreCompleto: student.nombreCompleto,
+    dateStart: start,
+    dateEnd: end,
+    results,
+    actionRequired: document.getElementById('actionRequired').value,
+    notes: document.getElementById('notes').value || '',
+    teacherEmail: auth.currentUser.email,
+    createdAt: serverTimestamp()
+  });
+
+  window.print();
+};
+</script>
+</body>
+</html>
