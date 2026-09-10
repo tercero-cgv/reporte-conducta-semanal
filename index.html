@@ -90,6 +90,7 @@
     <button type="button" class="secondary" onclick="saveDraft()">Guardar avance (sin cerrar semana)</button>
     <p id="draftStatus" style="text-align:center; font-size:13px; color:#64748b; min-height:16px;"></p>
     <button type="button" onclick="generateReport()">Generar e Imprimir Reporte (cierra la semana)</button>
+    <button type="button" class="secondary" onclick="closeWeekNoPrint()">Cerrar Semana sin Imprimir</button>
     <button type="button" class="secondary" onclick="toggleHistory()">Ver Historial del Estudiante</button>
     <button type="button" class="secondary" onclick="exportHistoryCSV()">Exportar Historial de este Estudiante (CSV)</button>
     <button type="button" class="secondary" onclick="exportAllHistoryCSV()">Exportar Historial de TODOS (CSV)</button>
@@ -460,7 +461,7 @@ window.printAllForWeek = async function() {
   });
 };
 
-window.generateReport = async function() {
+async function finalizeReport(shouldPrint) {
   const studentId = document.getElementById('studentSelect').value;
   const start = document.getElementById('dateStart').value;
   const end = document.getElementById('dateEnd').value;
@@ -523,8 +524,17 @@ window.generateReport = async function() {
     await deleteDoc(doc(db, 'reporteConductaBorrador', draftId(studentId, start)));
   } catch (e) { /* si no había borrador, no pasa nada */ }
 
-  window.print();
-};
+  if (shouldPrint) {
+    window.print();
+  } else {
+    document.getElementById('draftStatus').innerText = `Semana cerrada para ${student.nombreCompleto} (sin imprimir).`;
+    resetCriteriaForm();
+    document.getElementById('studentSelect').value = '';
+  }
+}
+
+window.generateReport = function() { finalizeReport(true); };
+window.closeWeekNoPrint = function() { finalizeReport(false); };
 </script>
 </body>
 </html>
