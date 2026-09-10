@@ -96,6 +96,14 @@
 
     <div id="historyView" style="display:none;"></div>
   </form>
+
+  <div style="border-top:1px solid var(--border); padding-top:15px; margin-top:15px;">
+    <h3>Imprimir Todos los Reportes de una Semana</h3>
+    <label>Fecha de Inicio de esa semana:</label>
+    <input type="date" id="batchWeekStart">
+    <button type="button" class="secondary" onclick="printAllForWeek()">Imprimir Todos</button>
+    <p id="batchStatus" style="text-align:center; font-size:13px; color:#64748b; min-height:16px;"></p>
+  </div>
 </div>
 
 <div id="printableArea" class="print-only">
@@ -127,6 +135,8 @@
     </div>
   </div>
 </div>
+
+<div id="batchPrintArea"></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -372,6 +382,82 @@ window.exportAllHistoryCSV = async function() {
     rows.push([e.nombreCompleto || e.estudianteId, e.dateStart, e.dateEnd, ...criteria.map(c => e.results[c.id] || '')]);
   });
   downloadCSV('historial_todos_los_estudiantes.csv', rows);
+};
+
+window.printAllForWeek = async function() {
+  const weekStart = document.getElementById('batchWeekStart').value;
+  const statusEl = document.getElementById('batchStatus');
+  if (!weekStart) { statusEl.innerText = 'Selecciona la fecha de inicio de la semana.'; return; }
+
+  statusEl.innerText = 'Buscando reportes...';
+  const q = query(collection(db, 'reporteConducta'), where('dateStart', '==', weekStart));
+  const snap = await getDocs(q);
+  if (snap.empty) {
+    statusEl.innerText = 'No hay reportes generados para esa semana. Revisa que hayas usado "Generar e Imprimir" (no solo "Guardar avance") para los estudiantes.';
+    return;
+  }
+
+  const entries = [];
+  snap.forEach(d => entries.push(d.data()));
+  entries.sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto));
+
+  statusEl.innerText = `Preparando ${entries.length} reporte(s) para imprimir...`;
+
+  const scaleLabels = { S:'S - Siempre', F:'F - Con Frecuencia', R:'R - Rara vez' };
+  const batchArea = document.getElementById('batchPrintArea');
+  let html = '';
+
+  for (const entry of entries) {
+    const fullHistory = await fetchHistory(entry.estudianteId);
+    const priorHistory = fullHistory.filter(h => h.dateStart !== entry.dateStart);
+    const flagged = detectPatterns(priorHistory, entry.results);
+    const alertHtml = flagged.length > 0
+      ? `<p style="color:#b91c1c; font-weight:bold; border:2px solid #b91c1c; padding:8px; border-radius:6px;">Alerta de patrón (2+ semanas con "R"): ${flagged.join('; ')}</p>`
+      : '';
+
+    const teacherRows = criteria.map(c => `<tr><td>${c.text}</td><td style="text-align:center; font-weight:bold;">${entry.results[c.id] || '-'}</td></tr>`).join('');
+    const parentRows = criteria.map(c => `<tr><td>${c.text}</td><td style="text-align:center; font-weight:bold;">${scaleLabels[entry.results[c.id]] || '-'}</td></tr>`).join('');
+
+    html += `
+      <div class="batch-page" style="page-break-after: always;">
+        <div>
+          <p style="text-align:center; font-weight:bold; font-size:10pt; margin-bottom:2px;">COPIA DEL MAESTRO — ARCHIVAR</p>
+          <p style="font-size:10pt; margin:2px 0;">Estudiante: ${entry.nombreCompleto} | Semana: ${entry.dateStart} al ${entry.dateEnd}</p>
+          <table style="font-size:10pt;"><thead><tr><th>Criterio</th><th style="width:15%;">Resultado</th></tr></thead><tbody>${teacherRows}</tbody></table>
+        </div>
+        <div class="cut-line"><p style="text-align:center; font-weight:bold;">✂ CORTAR AQUÍ — LO SIGUIENTE SE ENVÍA AL HOGAR ✂</p></div>
+        <h2 style="margin-bottom:5px;">REPORTE SEMANAL DE CONDUCTA Y RESPONSABILIDAD</h2>
+        <p style="text-align:center; font-size:11pt; margin-top:0;">Comunicación Familia - Escuela</p>
+        <p><strong>Estudiante:</strong> ${entry.nombreCompleto} | <strong>Grado:</strong> 3-1</p>
+        <p><strong>Semana del:</strong> ${entry.dateStart} al ${entry.dateEnd}</p>
+        <table><thead><tr><th>Área de Evaluación</th><th style="width:15%; text-align:center;">Resultado</th></tr></thead><tbody>${parentRows}</tbody></table>
+        ${alertHtml}
+        <p style="margin-top:15px;"><strong>Acción requerida:</strong> ${entry.actionRequired}</p>
+        <p><strong>Observaciones:</strong> ${entry.notes || 'Sin observaciones adicionales.'}</p>
+        <div class="cut-line">
+          <p style="text-align:center; font-weight:bold;">✂ DESPRENDER Y DEVOLVER FIRMADO AL MAESTRO EL PRÓXIMO LUNES ✂</p>
+          <p><strong>ACUSE DE RECIBO DE REPORTE SEMANAL</strong></p>
+          <p>Estudiante: ${entry.nombreCompleto} | Semana: ${entry.dateStart} al ${entry.dateEnd}</p>
+          <p>Confirmo que he revisado el reporte de conducta semanal correspondiente a mi hijo(a).</p><br>
+          <div style="display:flex; justify-content:space-between; margin-top:20px;">
+            <div>Firma del Encargado: ___________________________</div>
+            <div>Fecha: ____/____/________</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  batchArea.innerHTML = html;
+  document.getElementById('printableArea').classList.remove('print-only');
+  batchArea.classList.add('print-only');
+  statusEl.innerText = `Listo: ${entries.length} reporte(s). Abriendo impresión...`;
+  window.print();
+
+  window.addEventListener('afterprint', function restore() {
+    batchArea.classList.remove('print-only');
+    document.getElementById('printableArea').classList.add('print-only');
+    window.removeEventListener('afterprint', restore);
+  });
 };
 
 window.generateReport = async function() {
