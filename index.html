@@ -106,6 +106,7 @@
     <h3>Imprimir Todos los Reportes de una Semana</h3>
     <label>Fecha de Inicio de esa semana:</label>
     <input type="date" id="batchWeekStart">
+    <button type="button" class="secondary" onclick="downloadWordForWeek()">Descargar Todos como Word (.doc)</button>
     <button type="button" class="secondary" onclick="printAllForWeek()">Imprimir Todos</button>
     <p id="batchStatus" style="text-align:center; font-size:13px; color:#64748b; min-height:16px;"></p>
   </div>
@@ -387,6 +388,92 @@ window.exportAllHistoryCSV = async function() {
     rows.push([e.nombreCompleto || e.estudianteId, e.dateStart, e.dateEnd, ...criteria.map(c => e.results[c.id] || '')]);
   });
   downloadCSV('historial_todos_los_estudiantes.csv', rows);
+};
+
+window.downloadWordForWeek = async function() {
+  const weekStart = document.getElementById('batchWeekStart').value;
+  const statusEl = document.getElementById('batchStatus');
+  if (!weekStart) { statusEl.innerText = 'Selecciona la fecha de inicio de la semana.'; return; }
+
+  statusEl.innerText = 'Buscando reportes...';
+  const q = query(collection(db, 'reporteConducta'), where('dateStart', '==', weekStart));
+  const snap = await getDocs(q);
+  if (snap.empty) {
+    statusEl.innerText = 'No hay reportes generados para esa semana. Revisa que hayas usado "Generar" o "Cerrar Semana" (no solo "Guardar avance").';
+    return;
+  }
+
+  const entries = [];
+  snap.forEach(d => entries.push(d.data()));
+  entries.sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto));
+
+  statusEl.innerText = `Preparando documento Word con ${entries.length} reporte(s)...`;
+
+  const scaleLabels = { S:'S - Siempre', F:'F - Con Frecuencia', R:'R - Rara vez' };
+  let body = '';
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const fullHistory = await fetchHistory(entry.estudianteId);
+    const priorHistory = fullHistory.filter(h => h.dateStart !== entry.dateStart);
+    const flagged = detectPatterns(priorHistory, entry.results);
+    const alertHtml = flagged.length > 0
+      ? `<p style="color:#b91c1c; font-weight:bold; border:2px solid #b91c1c; padding:6px;">Alerta de patrón (2+ semanas con "R"): ${flagged.join('; ')}</p>`
+      : '';
+
+    const teacherRows = criteria.map(c => `<tr><td>${c.text}</td><td style="text-align:center; font-weight:bold;">${entry.results[c.id] || '-'}</td></tr>`).join('');
+    const parentRows = criteria.map(c => `<tr><td>${c.text}</td><td style="text-align:center; font-weight:bold;">${scaleLabels[entry.results[c.id]] || '-'}</td></tr>`).join('');
+    const pageBreakStyle = i === 0 ? '' : 'page-break-before:always; mso-page-break-before:always;';
+
+    body += `
+      <div style="${pageBreakStyle}">
+        <p style="text-align:center; font-weight:bold; font-size:10pt; margin-bottom:2px;">COPIA DEL MAESTRO — ARCHIVAR</p>
+        <p style="font-size:10pt; margin:2px 0;">Estudiante: ${entry.nombreCompleto} | Semana: ${entry.dateStart} al ${entry.dateEnd}</p>
+        <table style="font-size:10pt;"><thead><tr><th>Criterio</th><th style="width:15%;">Resultado</th></tr></thead><tbody>${teacherRows}</tbody></table>
+        <div class="cut-line"><p style="text-align:center; font-weight:bold;">✂ CORTAR AQUÍ — LO SIGUIENTE SE ENVÍA AL HOGAR ✂</p></div>
+        <h2 style="margin-bottom:5px;">REPORTE SEMANAL DE CONDUCTA Y RESPONSABILIDAD</h2>
+        <p style="text-align:center; font-size:11pt; margin-top:0;">Comunicación Familia - Escuela</p>
+        <p><strong>Estudiante:</strong> ${entry.nombreCompleto} | <strong>Grado:</strong> 3-1</p>
+        <p><strong>Semana del:</strong> ${entry.dateStart} al ${entry.dateEnd}</p>
+        <table><thead><tr><th>Área de Evaluación</th><th style="width:15%; text-align:center;">Resultado</th></tr></thead><tbody>${parentRows}</tbody></table>
+        ${alertHtml}
+        <p style="margin-top:15px;"><strong>Acción requerida:</strong> ${entry.actionRequired}</p>
+        <p><strong>Observaciones:</strong> ${entry.notes || 'Sin observaciones adicionales.'}</p>
+        <div class="cut-line">
+          <p style="text-align:center; font-weight:bold;">✂ DESPRENDER Y DEVOLVER FIRMADO AL MAESTRO EL PRÓXIMO LUNES ✂</p>
+          <p><strong>ACUSE DE RECIBO DE REPORTE SEMANAL</strong></p>
+          <p>Estudiante: ${entry.nombreCompleto} | Semana: ${entry.dateStart} al ${entry.dateEnd}</p>
+          <p>Confirmo que he revisado el reporte de conducta semanal correspondiente a mi hijo(a).</p>
+          <table style="margin-top:20px;"><tr>
+            <td style="width:70%; border:none;">Firma del Encargado: ___________________________</td>
+            <td style="border:none;">Fecha: ____/____/________</td>
+          </tr></table>
+        </div>
+      </div>`;
+  }
+
+  const wordDoc = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset="utf-8">
+<style>
+@page Section1 { size:8.5in 11.0in; margin:0.4in 0.4in 0.4in 0.4in; mso-page-orientation: portrait; }
+div.Section1 { page:Section1; }
+body { font-family: Arial, sans-serif; }
+table { border-collapse:collapse; width:100%; }
+th, td { border:1px solid #000; padding:6px; font-size:11pt; text-align:left; }
+th { background:#f2f2f2; }
+h2 { color:#1e3a8a; text-align:center; }
+</style>
+</head>
+<body><div class="Section1">${body}</div></body></html>`;
+
+  const blob = new Blob(['\ufeff', wordDoc], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `reportes_conducta_${weekStart}.doc`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  statusEl.innerText = `Descargado: ${entries.length} reporte(s) en un solo Word.`;
 };
 
 window.printAllForWeek = async function() {
