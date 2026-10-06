@@ -72,6 +72,12 @@
     <label>Estudiante:</label>
     <select id="studentSelect"><option value="">Cargando estudiantes...</option></select>
 
+    <label>Seguimiento de este estudiante:</label>
+    <select id="modeSelect" onchange="saveMode()">
+      <option value="semanal">Reporte semanal</option>
+      <option value="incidencias">Solo incidencias (reporte únicamente si hay algún F o R)</option>
+    </select>
+
     <div class="grid-2">
       <div><label>Desde (Fecha Inicio):</label><input type="date" id="dateStart" required></div>
       <div><label>Hasta (Fecha Fin):</label><input type="date" id="dateEnd" required></div>
@@ -172,6 +178,58 @@ const criteria = [
 ];
 
 let students = [];
+let modes = {};
+
+function dedupeByWeek(list) {
+  const map = new Map();
+  list.forEach(e => map.set(`${e.estudianteId}_${e.dateStart}`, e)); // conserva el último
+  return Array.from(map.values());
+}
+
+async function loadModes() {
+  modes = {};
+  try {
+    const snap = await getDocs(collection(db, 'reporteConductaModo'));
+    snap.forEach(d => { modes[d.id] = d.data().modo; });
+  } catch (e) { console.error('No se pudieron cargar los modos:', e); }
+}
+
+function optionLabel(s) {
+  return s.nombreCompleto + (modes[s.id] === 'incidencias' ? ' (incidencias)' : '');
+}
+
+function syncModeSelect() {
+  const id = document.getElementById('studentSelect').value;
+  document.getElementById('modeSelect').value = (id && modes[id]) ? modes[id] : 'semanal';
+}
+
+window.saveMode = async function() {
+  const id = document.getElementById('studentSelect').value;
+  const statusEl = document.getElementById('draftStatus');
+  if (!id) { statusEl.innerText = 'Selecciona primero un estudiante.'; document.getElementById('modeSelect').value = 'semanal'; return; }
+  const modo = document.getElementById('modeSelect').value;
+  try {
+    await setDoc(doc(db, 'reporteConductaModo', id), { modo, updatedAt: serverTimestamp() });
+    modes[id] = modo;
+    const s = students.find(x => x.id === id);
+    const opt = document.querySelector(`#studentSelect option[value="${id}"]`);
+    if (s && opt) opt.textContent = optionLabel(s);
+    statusEl.innerText = `${s.nombreCompleto}: seguimiento cambiado a "${modo === 'incidencias' ? 'solo incidencias' : 'reporte semanal'}".`;
+  } catch (e) {
+    statusEl.innerText = 'Error guardando el modo: ' + e.message;
+  }
+};
+
+// En lote: los de "solo incidencias" salen únicamente si ese reporte tiene algún F o R
+function filterForBatch(entries) {
+  const included = [], excluded = [];
+  entries.forEach(e => {
+    const incidencia = Object.values(e.results || {}).some(v => v !== 'S');
+    if (modes[e.estudianteId] === 'incidencias' && !incidencia) excluded.push(e);
+    else included.push(e);
+  });
+  return { included, excluded };
+}
 
 window.doLogin = async function() {
   const email = document.getElementById('loginEmail').value;
@@ -192,6 +250,7 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'block';
     document.getElementById('userEmailLabel').innerText = user.email;
+    await loadModes();
     await loadStudents();
     buildCriteriaForm();
   } else {
@@ -212,9 +271,9 @@ async function loadStudents() {
       students.push({ id: docSnap.id, nombreCompleto: `${d.nombre} ${d.apellidos}` });
     });
     sel.innerHTML = '<option value="">-- Seleccione --</option>' +
-      students.map(s => `<option value="${s.id}">${s.nombreCompleto}</option>`).join('');
-    sel.addEventListener('change', loadDraft);
-    document.getElementById('dateStart').addEventListener('change', loadDraft);
+      students.map(s => `<option value="${s.id}">${optionLabel(s)}</option>`).join('');
+    sel.onchange = () => { syncModeSelect(); loadDraft(); };
+    document.getElementById('dateStart').onchange = loadDraft;
   } catch (e) {
     const urlMatch = e.message.match(/https:\/\/[^\s]+/);
     if (urlMatch) {
@@ -321,7 +380,7 @@ async function fetchHistory(studentId) {
   const snap = await getDocs(q);
   const history = [];
   snap.forEach(d => history.push(d.data()));
-  return history;
+  return dedupeByWeek(history);
 }
 
 function detectPatterns(history, latestResults) {
@@ -383,8 +442,9 @@ window.exportAllHistoryCSV = async function() {
   if (snap.empty) { alert('No hay historial guardado todavía.'); return; }
   const header = ['Estudiante','Semana Inicio','Semana Fin', ...criteria.map(c => c.id)];
   const rows = [header];
-  snap.forEach(d => {
-    const e = d.data();
+  const all = [];
+  snap.forEach(d => all.push(d.data()));
+  dedupeByWeek(all).forEach(e => {
     rows.push([e.nombreCompleto || e.estudianteId, e.dateStart, e.dateEnd, ...criteria.map(c => e.results[c.id] || '')]);
   });
   downloadCSV('historial_todos_los_estudiantes.csv', rows);
@@ -403,11 +463,13 @@ window.downloadWordForWeek = async function() {
     return;
   }
 
-  const entries = [];
-  snap.forEach(d => entries.push(d.data()));
+  const rawEntries = [];
+  snap.forEach(d => rawEntries.push(d.data()));
+  const { included: entries, excluded } = filterForBatch(dedupeByWeek(rawEntries));
   entries.sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto));
+  if (entries.length === 0) { statusEl.innerText = 'Ningún reporte de esa semana requiere impresión.'; return; }
 
-  statusEl.innerText = `Preparando documento Word con ${entries.length} reporte(s)...`;
+  statusEl.innerText = `Preparando documento Word con ${entries.length} reporte(s) (${excluded.length} en "solo incidencias" sin incidencia, omitidos)...`;
 
   const scaleLabels = { S:'S - Siempre', F:'F - Con Frecuencia', R:'R - Rara vez' };
   let body = '';
@@ -489,11 +551,13 @@ window.printAllForWeek = async function() {
     return;
   }
 
-  const entries = [];
-  snap.forEach(d => entries.push(d.data()));
+  const rawEntries = [];
+  snap.forEach(d => rawEntries.push(d.data()));
+  const { included: entries, excluded } = filterForBatch(dedupeByWeek(rawEntries));
   entries.sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto));
+  if (entries.length === 0) { statusEl.innerText = 'Ningún reporte de esa semana requiere impresión.'; return; }
 
-  statusEl.innerText = `Preparando ${entries.length} reporte(s) para imprimir...`;
+  statusEl.innerText = `Preparando ${entries.length} reporte(s) para imprimir (${excluded.length} en "solo incidencias" sin incidencia, omitidos)...`;
 
   const scaleLabels = { S:'S - Siempre', F:'F - Con Frecuencia', R:'R - Rara vez' };
   const batchArea = document.getElementById('batchPrintArea');
@@ -586,7 +650,7 @@ async function finalizeReport(shouldPrint) {
     tBody.innerHTML += `<tr><td>${c.text}</td><td style="text-align:center; font-weight:bold;">${results[c.id]}</td></tr>`;
   });
 
-  const history = await fetchHistory(studentId);
+  const history = (await fetchHistory(studentId)).filter(h => h.dateStart !== start);
   const flagged = detectPatterns(history, results);
   const pAlert = document.getElementById('pPatternAlert');
   const tAlert = document.getElementById('tPatternAlert');
@@ -599,7 +663,7 @@ async function finalizeReport(shouldPrint) {
     tAlert.style.display = 'none'; tAlert.innerText = '';
   }
 
-  await addDoc(collection(db, 'reporteConducta'), {
+  await setDoc(doc(db, 'reporteConducta', `${studentId}_${start}`), {
     estudianteId: studentId,
     nombreCompleto: student.nombreCompleto,
     dateStart: start,
