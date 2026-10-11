@@ -32,12 +32,12 @@
   #userBar button { width:auto; padding:6px 12px; font-size:12px; margin:0; }
   @media print {
     @page { size: letter; margin: 0.4in; }
-    body { background:#fff; padding:0; }
+    body { background:#fff; padding:0; font-family:"Univers Condensed","Univers Condensed Light","Arial Narrow",Arial,sans-serif; font-weight:300; }
     .no-print { display:none !important; }
     .container { box-shadow:none; border:none; padding:0; max-width:100%; }
     .print-only { display:block !important; }
     table { width:100%; border-collapse:collapse; margin-top:15px; break-inside:avoid; page-break-inside:avoid; }
-    th,td { border:1px solid #000; padding:8px; text-align:left; font-size:12pt; }
+    th,td { border:1px solid #000; padding:5px 8px; text-align:left; font-size:11pt; }
     th { background:#f2f2f2; }
     .cut-line { border-top:2px dashed #000; margin-top:30px; padding-top:15px; break-inside:avoid; page-break-inside:avoid; }
     .batch-page { break-after:page; page-break-after:always; break-inside:avoid; page-break-inside:avoid; }
@@ -131,7 +131,7 @@
   <p style="text-align:center; font-size:11pt; margin-top:0;">Comunicación Familia - Escuela</p>
   <p><strong>Estudiante:</strong> <span id="pName"></span> | <strong>Grado:</strong> 3-1</p>
   <p><strong>Semana del:</strong> <span id="pDates"></span></p>
-  <table><thead><tr><th>Área de Evaluación</th><th style="width:15%; text-align:center;">Resultado</th></tr></thead><tbody id="pTableBody"></tbody></table>
+  <table><thead><tr><th>Área de Evaluación</th><th style="width:24%; text-align:center;">Resultado</th></tr></thead><tbody id="pTableBody"></tbody></table>
   <p id="pPatternAlert" style="display:none; color:#b91c1c; font-weight:bold; border:2px solid #b91c1c; padding:8px; border-radius:6px;"></p>
   <p style="margin-top:15px;"><strong>Acción requerida:</strong> <span id="pAction"></span></p>
   <p><strong>Observaciones:</strong> <span id="pNotes"></span></p>
@@ -168,17 +168,30 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// Todos redactados en positivo: S = Siempre cumple, R = Rara vez cumple.
 const criteria = [
-  { id: 'puntualidad', text: 'Puntualidad: Llega a tiempo al salón al inicio del día y luego del almuerzo.' },
-  { id: 'respeto', text: 'Respeto a la autoridad: Sigue instrucciones al primer llamado sin faltar al respeto.' },
-  { id: 'atencion', text: 'Atención en clase: Escucha en silencio durante las explicaciones sin hablar constantemente.' },
-  { id: 'trabajo', text: 'Trabajo individual: Inicia y termina sus tareas a tiempo sin copiarse de otros.' },
-  { id: 'bano', text: 'Uso del tiempo: No solicita ir al baño en exceso de forma repetida sin necesidad.' },
-  { id: 'alerta', text: 'Alerta y descanso: Llega a clase descansado(a) y se mantiene despierto(a) durante las lecciones.' }
+  { id: 'comida', text: 'Alimentos y bebida: No consume alimentos ni bebida durante la clase.' },
+  { id: 'atencion', text: 'Turnos de palabra: Espera su turno para hablar y no interrumpe la clase.' },
+  { id: 'companeros', text: 'Trato a compañeros: No molesta a sus compañeros (bromas constantes, empujones, susurros).' },
+  { id: 'alerta', text: 'Alerta y descanso: Llega descansado(a) y se mantiene despierto(a) durante las lecciones.' },
+  { id: 'ruidos', text: 'Ruidos: No hace ruidos innecesarios (golpear el pupitre, mover la silla, jugar con objetos).' },
+  { id: 'respeto', text: 'Respeto: Sigue instrucciones al primer llamado y usa lenguaje y gestos respetuosos.' },
+  { id: 'puntualidad', text: 'Puntualidad y permanencia: Llega a tiempo y no sale del salón sin justificación.' }
 ];
+
+// Criterios anteriores: ya no se evalúan, pero se muestran en historial y CSV para no perder datos viejos.
+const legacyCriteria = [
+  { id: 'trabajo', text: 'Trabajo individual (criterio anterior)' },
+  { id: 'bano', text: 'Uso del tiempo / baño (criterio anterior)' }
+];
+const historyColumns = criteria.concat(legacyCriteria);
 
 let students = [];
 let modes = {};
+
+function escapeHtml(t) {
+  return String(t || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
 function dedupeByWeek(list) {
   const map = new Map();
@@ -388,7 +401,7 @@ function detectPatterns(history, latestResults) {
   const flagged = [];
   criteria.forEach(c => {
     const rCount = lastThree.filter(e => e.results[c.id] === 'R').length;
-    if (rCount >= 2) flagged.push(c.text);
+    if (rCount >= 2) flagged.push(c.text.split(':')[0]);
   });
   return flagged;
 }
@@ -402,9 +415,9 @@ window.toggleHistory = async function() {
     if (history.length === 0) {
       view.innerHTML = '<p style="text-align:center; color:#64748b;">Sin historial guardado para este estudiante.</p>';
     } else {
-      let html = '<table><thead><tr><th>Semana</th>' + criteria.map(c => `<th>${c.id}</th>`).join('') + '</tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Semana</th>' + historyColumns.map(c => `<th>${c.id}</th>`).join('') + '<th>Observaciones</th></tr></thead><tbody>';
       history.forEach(e => {
-        html += `<tr><td>${e.dateStart} - ${e.dateEnd}</td>` + criteria.map(c => `<td>${e.results[c.id] || '-'}</td>`).join('') + '</tr>';
+        html += `<tr><td>${e.dateStart} - ${e.dateEnd}</td>` + historyColumns.map(c => `<td>${e.results[c.id] || '-'}</td>`).join('') + `<td style="text-align:left;">${escapeHtml(e.notes)}</td></tr>`;
       });
       html += '</tbody></table>';
       view.innerHTML = html;
@@ -431,21 +444,21 @@ window.exportHistoryCSV = async function() {
   const student = students.find(s => s.id === studentId);
   const history = await fetchHistory(studentId);
   if (history.length === 0) { alert('Sin historial para este estudiante.'); return; }
-  const header = ['Estudiante','Semana Inicio','Semana Fin', ...criteria.map(c => c.id)];
+  const header = ['Estudiante','Semana Inicio','Semana Fin', ...historyColumns.map(c => c.id), 'Observaciones'];
   const rows = [header];
-  history.forEach(e => rows.push([student.nombreCompleto, e.dateStart, e.dateEnd, ...criteria.map(c => e.results[c.id] || '')]));
+  history.forEach(e => rows.push([student.nombreCompleto, e.dateStart, e.dateEnd, ...historyColumns.map(c => e.results[c.id] || ''), e.notes || '']));
   downloadCSV(`historial_${student.nombreCompleto.replace(/\s+/g,'_')}.csv`, rows);
 };
 
 window.exportAllHistoryCSV = async function() {
   const snap = await getDocs(collection(db, 'reporteConducta'));
   if (snap.empty) { alert('No hay historial guardado todavía.'); return; }
-  const header = ['Estudiante','Semana Inicio','Semana Fin', ...criteria.map(c => c.id)];
+  const header = ['Estudiante','Semana Inicio','Semana Fin', ...historyColumns.map(c => c.id), 'Observaciones'];
   const rows = [header];
   const all = [];
   snap.forEach(d => all.push(d.data()));
   dedupeByWeek(all).forEach(e => {
-    rows.push([e.nombreCompleto || e.estudianteId, e.dateStart, e.dateEnd, ...criteria.map(c => e.results[c.id] || '')]);
+    rows.push([e.nombreCompleto || e.estudianteId, e.dateStart, e.dateEnd, ...historyColumns.map(c => e.results[c.id] || ''), e.notes || '']);
   });
   downloadCSV('historial_todos_los_estudiantes.csv', rows);
 };
@@ -497,7 +510,7 @@ window.downloadWordForWeek = async function() {
         <p style="text-align:center; font-size:11pt; margin-top:0;">Comunicación Familia - Escuela</p>
         <p><strong>Estudiante:</strong> ${entry.nombreCompleto} | <strong>Grado:</strong> 3-1</p>
         <p><strong>Semana del:</strong> ${entry.dateStart} al ${entry.dateEnd}</p>
-        <table><thead><tr><th>Área de Evaluación</th><th style="width:15%; text-align:center;">Resultado</th></tr></thead><tbody>${parentRows}</tbody></table>
+        <table><thead><tr><th>Área de Evaluación</th><th style="width:24%; text-align:center;">Resultado</th></tr></thead><tbody>${parentRows}</tbody></table>
         ${alertHtml}
         <p style="margin-top:15px;"><strong>Acción requerida:</strong> ${entry.actionRequired}</p>
         <p><strong>Observaciones:</strong> ${entry.notes || 'Sin observaciones adicionales.'}</p>
@@ -519,7 +532,7 @@ window.downloadWordForWeek = async function() {
 <style>
 @page Section1 { size:8.5in 11.0in; margin:0.4in 0.4in 0.4in 0.4in; mso-page-orientation: portrait; }
 div.Section1 { page:Section1; }
-body { font-family: Arial, sans-serif; }
+body { font-family: "Univers Condensed","Univers Condensed Light","Arial Narrow",Arial,sans-serif; }
 table { border-collapse:collapse; width:100%; }
 th, td { border:1px solid #000; padding:6px; font-size:11pt; text-align:left; }
 th { background:#f2f2f2; }
@@ -586,7 +599,7 @@ window.printAllForWeek = async function() {
         <p style="text-align:center; font-size:11pt; margin-top:0;">Comunicación Familia - Escuela</p>
         <p><strong>Estudiante:</strong> ${entry.nombreCompleto} | <strong>Grado:</strong> 3-1</p>
         <p><strong>Semana del:</strong> ${entry.dateStart} al ${entry.dateEnd}</p>
-        <table><thead><tr><th>Área de Evaluación</th><th style="width:15%; text-align:center;">Resultado</th></tr></thead><tbody>${parentRows}</tbody></table>
+        <table><thead><tr><th>Área de Evaluación</th><th style="width:24%; text-align:center;">Resultado</th></tr></thead><tbody>${parentRows}</tbody></table>
         ${alertHtml}
         <p style="margin-top:15px;"><strong>Acción requerida:</strong> ${entry.actionRequired}</p>
         <p><strong>Observaciones:</strong> ${entry.notes || 'Sin observaciones adicionales.'}</p>
